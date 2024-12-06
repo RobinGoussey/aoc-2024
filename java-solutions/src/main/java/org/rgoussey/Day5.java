@@ -3,8 +3,6 @@ package org.rgoussey;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
-import org.rgoussey.Day4.WordFinder;
 import org.rgoussey.shared.FileUtils;
 
 public class Day5 {
@@ -12,7 +10,7 @@ public class Day5 {
 
   public static void main(String[] args) {
     List<String> lines = FileUtils.getLines(5);
-    pageOrderValidator pageOrderValidator = new pageOrderValidator(lines);
+    PageOrderValidator pageOrderValidator = new PageOrderValidator(lines);
     System.out.println(
         pageOrderValidator.getSumOfMiddleNumbers(pageOrderValidator.getUpdatesInOrder()));
     List<int[]> updatesNotInOrder = pageOrderValidator.getUpdatesNotInOrder();
@@ -20,12 +18,12 @@ public class Day5 {
         pageOrderValidator.getSumOfMiddleNumbers(pageOrderValidator.sort(updatesNotInOrder)));
   }
 
-  static class pageOrderValidator {
+  static class PageOrderValidator {
 
     private List<int[]> updates = new ArrayList<>();
     private List<PageOrderRule> pageOrderRules = new ArrayList<>();
 
-    public pageOrderValidator(List<String> lines) {
+    public PageOrderValidator(List<String> lines) {
       String line = lines.get(0);
       int counter = 0;
       while (!"".equals(line)) {
