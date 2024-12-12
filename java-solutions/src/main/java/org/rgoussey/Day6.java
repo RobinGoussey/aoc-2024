@@ -7,13 +7,21 @@ public class Day6 {
 
   public static void main(String[] args) {
     List<String> lines = FileUtils.getLines(6);
-    Maze maze = new Maze(lines);
-    maze.draw(maze.path, null);
-    System.out.println("Positions visited: " + maze.countPositionsVisited());
-    maze.drawPathForNewObstacles();
+    Room room = new Room(lines);
+    Guard startingGuard = room.getStartingGuard();
+    room.walkGuard(startingGuard);
+    System.out.println("Positions visited: " + startingGuard.getAmountOfPlacesVisited());
+
+    boolean[][] newObstacles = room.findNewObstacles();
+    int count = Day6.countObstacles(newObstacles);
+    System.out.println("New obstacles: " + count);
   }
 
   protected record Position(int y, int x) {
+
+    Position(final Position position) {
+      this(position.y(), position.x());
+    }
 
   }
 
@@ -21,10 +29,31 @@ public class Day6 {
 
     private byte direction;
     private Position position;
+    private final byte[][] history;
 
-    Guard(int y, int x, byte direction) {
-      this.position = new Position(y, x);
+    Guard(Guard guard) {
+      this.position = new Position(guard.position);
+      this.direction = guard.direction;
+      this.history = new byte[guard.history.length][guard.history[0].length];
+      for (int i = 0; i < guard.history.length; i++) {
+        System.arraycopy(guard.history[i], 0, history[i], 0, guard.history[i].length);
+      }
+    }
+
+    Guard(int depth, int length, final Position startPosition, byte direction) {
+      this.position = new Position(startPosition);
       this.direction = direction;
+      history = new byte[depth][length];
+    }
+
+    private void recordHistory() {
+      history[position.y()][position.x()] |= (byte) (0x01
+          << direction);
+    }
+
+    public boolean hasVisited(Position position, byte direction) {
+      return (history[position.y()][position.x()] & ((byte) (0x01
+          << direction))) != 0;
     }
 
     public byte getDirection() {
@@ -54,10 +83,6 @@ public class Day6 {
       }
     }
 
-    Position getPositionOnLeft() {
-      return getPositionOnDirection(direction - 1);
-    }
-
     private Position getPositionOnDirection(int direction) {
       if (direction > 3 || direction < 0) {
         direction = direction % 4;
@@ -73,26 +98,82 @@ public class Day6 {
     Position getPositionInFront() {
       return getPositionOnDirection(direction);
     }
+
+    void drawState(boolean[][] obstacles, Position newObstacle) {
+      for (int i = 0; i < history.length; i++) {
+        for (int j = 0; j < history[i].length; j++) {
+          if (obstacles[i][j]) {
+            System.out.print("#");
+          } else if (newObstacle.y() == i && newObstacle.x() == j) {
+            System.out.print("O");
+          } else if (position.y() == i && position.x() == j) {
+            switch (direction) {
+              case 0 -> System.out.print("^");
+              case 1 -> System.out.print(">");
+              case 2 -> System.out.print("v");
+              case 3 -> System.out.print("<");
+            }
+          } else if (history[i][j] == 0) {
+            System.out.print(".");
+          } else {
+            boolean hasVisitedVertically =
+                (history[i][j] & 0x01) != 0 || (history[i][j] & 0x04) != 0;
+            boolean hasVisitedHorizontally =
+                (history[i][j] & 0x02) != 0 || (history[i][j] & 0x08) != 0;
+            if (hasVisitedVertically && hasVisitedHorizontally) {
+              System.out.print("+");
+            } else if (hasVisitedVertically) {
+              System.out.print("|");
+            } else if (hasVisitedHorizontally) {
+              System.out.print("-");
+            }
+          }
+        }
+        System.out.println();
+      }
+      System.out.println("========");
+    }
+
+    int getAmountOfPlacesVisited() {
+      int count = 0;
+      for (int i = 0; i < history.length; i++) {
+        byte[] bytes = history[i];
+        for (int j = 0; j < bytes.length; j++) {
+          if (bytes[j] != 0) {
+            count++;
+          }
+        }
+      }
+      return count;
+    }
   }
 
-  protected static class Maze {
+  enum GuardState {
+    WALKING, OUT_OF_ROOM, LOOPING
+  }
+
+  protected static class Room {
 
     boolean[][] obstacles;
-    boolean[][] path;
-    boolean[][] pathForNewObstacles;
     // Axis is flipped, 0 is top, increases going down
     int startX;
     // Axis is flipped, 0 is top, increases going down
     int startY;
 
+    Room(Room room) {
+      this.obstacles = new boolean[room.obstacles.length][room.obstacles[0].length];
+      for (int i = 0; i < room.obstacles.length; i++) {
+        System.arraycopy(room.obstacles[i], 0, obstacles[i], 0, room.obstacles[i].length);
+      }
+      this.startX = room.startX;
+      this.startY = room.startY;
+    }
 
-    Maze(List<String> lines) {
+    Room(List<String> lines) {
       int depth = lines.size();
       int length = lines.getFirst().length();
 
       obstacles = new boolean[depth][length];
-      path = new boolean[depth][length];
-      pathForNewObstacles = new boolean[depth][length];
       for (int i = 0; i < depth; i++) {
         String line = lines.get(i);
         for (int j = 0; j < line.length(); j++) {
@@ -103,55 +184,71 @@ public class Day6 {
           }
         }
       }
-      figureOutPathWithTurnRight();
     }
 
-    void figureOutPathWithTurnRight() {
-      Guard guard = new Guard(startY, startX, (byte) 0);
-      while (isPositionInRoom(guard.position)) {
-        path[guard.position.y][guard.position.x] = true;
+    Guard getStartingGuard() {
+      return new Guard(obstacles.length, obstacles[0].length, new Position(startY, startX),
+          (byte) 0);
+    }
+
+    void walkGuardOutOfRoom(Guard guard) {
+      GuardState guardState;
+      do {
+        guardState = walkGuard(guard);
+      } while (guardState == GuardState.WALKING);
+    }
+
+    GuardState walkGuard(Guard guard) {
+      if (!isPositionInRoom(guard.getPosition())) {
+        return GuardState.OUT_OF_ROOM;
+      }
+      if (guard.hasVisited(guard.getPosition(), guard.getDirection())) {
+        return GuardState.LOOPING;
+      }
+      guard.recordHistory();
+      if (isPositionInRoom(guard.getPositionInFront()) && isObstacle(guard.getPositionInFront())) {
+        guard.rotateRight();
+      } else {
+        guard.moveForward();
+      }
+      return GuardState.WALKING;
+    }
+
+    boolean[][] findNewObstacles() {
+      boolean[][] newObstacles = new boolean[obstacles.length][obstacles[0].length];
+      GuardState guardState;
+      Guard guard = getStartingGuard();
+      do {
+        guardState = walkGuard(guard);
         Position positionInFront = guard.getPositionInFront();
         if (!isPositionInRoom(positionInFront)) {
-          break; // We reached the end
-        } else if (isObstacle(positionInFront)) {
-          guard.rotateRight();
-        } else {
-          if (obstacleWouldCauseLoop(guard)) {
-            pathForNewObstacles[guard.position.y][guard.position.x] = true;
-          }
-          guard.moveForward();
+          return newObstacles;
         }
-      }
+        byte reverseDirection = (byte) (guard.getDirection() + 2 % 4);
+        boolean guardCameFromThatDirection = guard.hasVisited(positionInFront,
+            reverseDirection);
+        if (!isObstacle(positionInFront) && !guardCameFromThatDirection) {
+          if(isLoopWithNewObstacle(positionInFront, guard)){
+            newObstacles[positionInFront.y()][positionInFront.x()] = true;
+            guard.drawState(obstacles, positionInFront);
+          }
+        }
+      } while (guardState == GuardState.WALKING);
+      return newObstacles;
     }
 
-    private boolean obstacleWouldCauseLoop(Guard guard) {
-      Guard guardCopy = new Guard(guard.getPosition().y(), guard.getPosition().x(),
-          (byte) (guard.getDirection() + 0x01));
-      byte[][] directionsCrossedOnPath = new byte[path.length][path[0].length];
-      for (int i = 0; i < directionsCrossedOnPath.length; i++) {
-        for (int j = 0; j < directionsCrossedOnPath[0].length; j++) {
-          directionsCrossedOnPath[i][j] = 0;
-        }
-      }
-      while (isPositionInRoom(guardCopy.position)) {
-        Position positionInFront = guardCopy.getPositionInFront();
-        if ((directionsCrossedOnPath[guardCopy.position.y][guardCopy.position.x] & ((byte) (0x01
-            << guardCopy.getDirection()))) != 0) {
-          return true;
-        }
-        if (!isPositionInRoom(positionInFront)) {
-          return false;
-        } else if (isObstacle(positionInFront)) {
-          guardCopy.rotateRight();
-        } else {
-          //Bitshift logic, a 1 will be set at the direction we came from
-          directionsCrossedOnPath[guardCopy.position.y][guardCopy.position.x] |= (byte) (0x01
-              << guardCopy.getDirection());
-          guardCopy.moveForward();
-        }
-      }
-      return false;
+    private boolean isLoopWithNewObstacle(Position positionInFront, Guard guard) {
+      Room newRoom = new Room(this);
+      newRoom.obstacles[positionInFront.y()][positionInFront.x()] = true;
+      Guard loopGuard = new Guard(guard);
+      loopGuard.rotateRight();
+      GuardState loopGuardState;
+      do {
+        loopGuardState = newRoom.walkGuard(loopGuard);
+      } while (loopGuardState == GuardState.WALKING);
+      return loopGuardState == GuardState.LOOPING;
     }
+
 
     private boolean isPositionInRoom(Position position) {
       return position.x >= 0 && position.x < obstacles[0].length && position.y >= 0
@@ -161,83 +258,17 @@ public class Day6 {
     boolean isObstacle(Position position) {
       return obstacles[position.y()][position.x()];
     }
+  }
 
-    void draw(Position position) {
-      draw(position.y(), position.x());
-    }
-
-    //Debug function
-    void draw(int y, int x) {
-      for (int i = 0; i < obstacles.length; i++) {
-        for (int j = 0; j < obstacles[i].length; j++) {
-          if (i == y && j == x) {
-            System.out.print(".");
-          } else if (obstacles[i][j]) {
-            System.out.print("#");
-          } else if (path[i][j]) {
-            System.out.print("X");
-          } else {
-            System.out.print(" ");
-          }
-        }
-        System.out.println();
-      }
-      System.out.println("==============================");
-    }
-
-    void draw(boolean[][] pathToDraw, Position position) {
-      for (int i = 0; i < obstacles.length; i++) {
-        for (int j = 0; j < obstacles[i].length; j++) {
-          if (position != null && i == position.y() && j == position.x()) {
-            System.out.print("1");
-          } else if (obstacles[i][j]) {
-            System.out.print("#");
-          } else if (pathToDraw[i][j]) {
-            System.out.print("X");
-          } else {
-            System.out.print(".");
-          }
-        }
-        System.out.println();
-      }
-      System.out.println("==============================");
-    }
-
-    void drawPathForNewObstacles() {
-      for (int i = 0; i < obstacles.length; i++) {
-        for (int j = 0; j < obstacles[i].length; j++) {
-          if (obstacles[i][j]) {
-            System.out.print("#");
-          } else if (pathForNewObstacles[i][j]) {
-            System.out.print("O");
-          } else {
-            System.out.print(".");
-          }
-        }
-        System.out.println();
-      }
-    }
-
-    int countPositionsVisited() {
-      return countTrueInNestedArray(path);
-    }
-
-    int countNewObstacles() {
-      return countTrueInNestedArray(pathForNewObstacles);
-    }
-
-    private int countTrueInNestedArray(boolean[][] pathForNewObstacles) {
-      int count = 0;
-      for (int i = 0; i < pathForNewObstacles.length; i++) {
-        for (int j = 0; j < pathForNewObstacles[i].length; j++) {
-          if (pathForNewObstacles[i][j]) {
-            count++;
-          }
+  static int countObstacles(boolean[][] obstacles) {
+    int count = 0;
+    for (int i = 0; i < obstacles.length; i++) {
+      for (int j = 0; j < obstacles[i].length; j++) {
+        if (obstacles[i][j]) {
+          count++;
         }
       }
-      return count;
     }
-
-
+    return count;
   }
 }
