@@ -6,23 +6,30 @@ import java.util.List;
 import org.rgoussey.shared.FileUtils;
 
 public class Day7 {
+
   public static void main(String[] args) {
     List<String> lines = FileUtils.getLines(7);
-    List<EquationPermutationHolder> equationPermutationHolders = parseLines(lines);
-    long count = equationPermutationHolders.stream().filter(EquationPermutationHolder::canBeSolved)
-        .map(EquationPermutationHolder::desiredResult)
-        .mapToLong(Long::longValue).sum();
+    List<EquationPermutationHolder> equationPermutationHolders = parseLines(lines, List.of(new Addition(), new Multiplication()));
+    long count = sumSolvableEquations(equationPermutationHolders);
+    System.out.println(count);
+    equationPermutationHolders = parseLines(lines, List.of(new Addition(), new Multiplication(), new Concatenate()));
+    count = sumSolvableEquations(equationPermutationHolders);
     System.out.println(count);
   }
 
-  public static List<EquationPermutationHolder> parseLines(List<String> lines) {
-    return lines.stream().map(Day7::parseLine).toList();
+  public static long sumSolvableEquations(List<EquationPermutationHolder> equationPermutationHolders){
+    return equationPermutationHolders.stream().filter(EquationPermutationHolder::canBeSolved)
+        .map(EquationPermutationHolder::desiredResult)
+        .mapToLong(Long::longValue).sum();
   }
 
-  static List<Operation> operations = List.of(new Addition(), new Multiplication());
+  public static List<EquationPermutationHolder> parseLines(List<String> lines, List<Operation> operations) {
+    return lines.stream().map((String line) -> parseLine(line,operations)).toList();
+  }
 
 
-  private static EquationPermutationHolder parseLine(String line){
+
+  private static EquationPermutationHolder parseLine(String line, List<Operation> operations){
     String[] split = line.split(":");
     long desiredResult = Long.parseLong(split[0]);
     long[] numbers = Arrays.stream(split[1].trim().split(" ")).mapToLong(Long::parseLong).toArray();
@@ -43,9 +50,6 @@ public class Day7 {
   }
 
   record EquationPermutationHolder(List<Equation> equations, long desiredResult) {
-    List<Equation> getEquationsThatEqualResult() {
-      return equations.stream().filter(equation -> equation.solve() == desiredResult).toList();
-    }
 
     boolean canBeSolved() {
       return equations.stream().anyMatch(equation -> equation.solve() == desiredResult);
@@ -98,6 +102,13 @@ public class Day7 {
     @Override
     public long apply(long a, long b) {
       return a * b;
+    }
+  }
+
+  static class Concatenate implements Operation {
+    @Override
+    public long apply(long a, long b) {
+      return Long.parseLong(a + "" + b);
     }
   }
 }
